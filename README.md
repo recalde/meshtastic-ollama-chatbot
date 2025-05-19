@@ -18,8 +18,10 @@ This project connects your **Meshtastic radio network** to an **Ollama LLM** (li
 
 ### 1. Clone the repo and build
 
+
+
 ```bash
-git clone https://github.com/yourname/meshtastic-ollama-chatbot.git
+git clone https://github.com/recalde/meshtastic-ollama-chatbot.git
 cd meshtastic-ollama-chatbot
 cp .env.example .env
 docker-compose up --build -d
