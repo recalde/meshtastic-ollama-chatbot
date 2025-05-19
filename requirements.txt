@@ -1,4 +1,4 @@
-meshtastic
+paho-mqtt
 requests
-rich
 python-dotenv
+rich

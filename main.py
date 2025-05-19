@@ -1,53 +1,122 @@
 import os
-import meshtastic
-import meshtastic.serial_interface
-import requests
 import time
-from meshtastic.mesh_pb2 import Data
-from rich import print
+import json
+import requests
+import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
+from rich import print
+from rich.console import Console
+from rich.markup import escape
+from threading import Lock
+from datetime import datetime
 
+# Setup
+console = Console()
 load_dotenv()
+
+# 🔧 Environment Variables
+MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_TOPIC_SUB = os.getenv("MQTT_TOPIC_SUB", "meshtastic/chatbot/request")
+MQTT_TOPIC_PUB = os.getenv("MQTT_TOPIC_PUB", "meshtastic/chatbot/reply")
+MQTT_CLIENT_ID = os.getenv("MQTT_CLIENT_ID", "meshtastic_bot")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 MAX_REPLY_LEN = int(os.getenv("MAX_REPLY_LEN", "240"))
 CONTEXT_DEPTH = int(os.getenv("CONTEXT_DEPTH", "5"))
+CONTEXT_FILE = os.getenv("CONTEXT_FILE", "/data/context.json")
 
+# 📒 Global State
 CONTEXT = {}
+LOCK = Lock()
 
+# 🔁 Load persistent context from file
+def load_context():
+    global CONTEXT
+    if os.path.exists(CONTEXT_FILE):
+        with open(CONTEXT_FILE, "r") as f:
+            CONTEXT = json.load(f)
+        console.print("🔁 [yellow]Loaded chat history from disk[/yellow]")
+    else:
+        console.print("📄 [blue]No existing context found, starting fresh[/blue]")
+
+# 💾 Save persistent context to file
+def save_context():
+    with LOCK:
+        with open(CONTEXT_FILE, "w") as f:
+            json.dump(CONTEXT, f, indent=2)
+
+# 🧠 Generate response from Ollama
 def generate_response(node_id, message):
-    history = CONTEXT.get(node_id, [])
-    history.append(f"User: {message}")
-    prompt = "\n".join(history[-CONTEXT_DEPTH:]) + "\nBot:"
-    CONTEXT[node_id] = history[-CONTEXT_DEPTH:]
+    with LOCK:
+        history = CONTEXT.get(node_id, [])
+        is_new = len(history) == 0
+        history.append(f"User: {message}")
+        prompt = "\n".join(history[-CONTEXT_DEPTH:]) + "\nBot:"
+        CONTEXT[node_id] = history[-CONTEXT_DEPTH:]
+
+    if is_new:
+        console.print(f"👋 [cyan]New chat started with [bold]{node_id}[/bold][/cyan]")
+    else:
+        console.print(f"📨 [cyan]Message received from [bold]{node_id}[/bold][/cyan]")
+
+    # 🕒 Start timer
+    start = time.perf_counter()
 
     response = requests.post(OLLAMA_URL, json={
         "model": MODEL,
         "prompt": prompt,
         "stream": False
     })
+
+    elapsed = time.perf_counter() - start
+
+    # ✍️ Parse response
     reply = response.json().get("response", "").strip()
-    CONTEXT[node_id].append(f"Bot: {reply}")
+
+    with LOCK:
+        CONTEXT[node_id].append(f"Bot: {reply}")
+        save_context()
+
+    console.print(f"🤖 [green]Response to {node_id}:[/green] {escape(reply[:60])}... ⏱️ {elapsed:.2f}s")
+
     return reply[:MAX_REPLY_LEN]
 
-def on_receive(packet, interface):
+# ✅ MQTT Connect callback
+def on_connect(client, userdata, flags, rc):
+    console.print(f"✅ [bold green]Connected to MQTT broker[/bold green] (code {rc})")
+    client.subscribe(MQTT_TOPIC_SUB)
+    console.print(f"📡 [blue]Subscribed to topic:[/blue] {MQTT_TOPIC_SUB}")
+
+# 📥 MQTT Message callback
+def on_message(client, userdata, msg):
     try:
-        node = packet["from"]
-        text = packet["decoded"]["text"]
-        print(f"[{node}] {text}")
+        payload = json.loads(msg.payload.decode())
+        node_id = payload.get("node", "unknown")
+        text = payload.get("text", "")
+        console.print(f"[{node_id}] 📝 {escape(text)}")
 
-        reply = generate_response(node, text)
-        interface.sendText(reply, destinationId=node)
+        reply = generate_response(node_id, text)
+        response_payload = {
+            "node": node_id,
+            "text": reply
+        }
+        client.publish(MQTT_TOPIC_PUB, json.dumps(response_payload))
+        console.print(f"📤 [magenta]Reply sent to {node_id}[/magenta]")
     except Exception as e:
-        print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]❌ Error processing message:[/red] {e}")
 
+# 🚀 Main entry
 def main():
-    iface = meshtastic.serial_interface.SerialInterface()
-    iface.onReceive = lambda packet: on_receive(packet, iface)
-    print("[green]Bot is listening...[/green]")
-    while True:
-        time.sleep(1)
+    load_context()
+    client = mqtt.Client(MQTT_CLIENT_ID)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+
+    console.print("🚀 [bold green]Chatbot is live and listening...[/bold green]")
+    client.loop_forever()
 
 if __name__ == "__main__":
     main()
