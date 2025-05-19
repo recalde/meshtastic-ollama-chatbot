@@ -1,0 +1,4 @@
+meshtastic
+requests
+rich
+python-dotenv
