@@ -8,13 +8,12 @@ from rich import print
 from rich.console import Console
 from rich.markup import escape
 from threading import Lock
-from datetime import datetime
 
-# Setup
+# 🎛 Initialize logging and load environment
 console = Console()
 load_dotenv()
 
-# 🔧 Environment Variables
+# 🔧 Load configuration from environment
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_TOPIC_SUB = os.getenv("MQTT_TOPIC_SUB", "meshtastic/chatbot/request")
@@ -22,16 +21,16 @@ MQTT_TOPIC_PUB = os.getenv("MQTT_TOPIC_PUB", "meshtastic/chatbot/reply")
 MQTT_CLIENT_ID = os.getenv("MQTT_CLIENT_ID", "meshtastic_bot")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 MAX_REPLY_LEN = int(os.getenv("MAX_REPLY_LEN", "240"))
 CONTEXT_DEPTH = int(os.getenv("CONTEXT_DEPTH", "5"))
 CONTEXT_FILE = os.getenv("CONTEXT_FILE", "/data/context.json")
 
-# 📒 Global State
+# 📒 Shared state
 CONTEXT = {}
 LOCK = Lock()
 
-# 🔁 Load persistent context from file
+# 🔁 Load chat context from disk
 def load_context():
     global CONTEXT
     if os.path.exists(CONTEXT_FILE):
@@ -41,13 +40,13 @@ def load_context():
     else:
         console.print("📄 [blue]No existing context found, starting fresh[/blue]")
 
-# 💾 Save persistent context to file
+# 💾 Save chat context to disk
 def save_context():
     with LOCK:
         with open(CONTEXT_FILE, "w") as f:
             json.dump(CONTEXT, f, indent=2)
 
-# 🧠 Generate response from Ollama
+# 🧠 Generate a response from Ollama
 def generate_response(node_id, message):
     with LOCK:
         history = CONTEXT.get(node_id, [])
@@ -61,18 +60,15 @@ def generate_response(node_id, message):
     else:
         console.print(f"📨 [cyan]Message received from [bold]{node_id}[/bold][/cyan]")
 
-    # 🕒 Start timer
     start = time.perf_counter()
 
     response = requests.post(OLLAMA_URL, json={
-        "model": MODEL,
+        "model": OLLAMA_MODEL,
         "prompt": prompt,
         "stream": False
     })
 
     elapsed = time.perf_counter() - start
-
-    # ✍️ Parse response
     reply = response.json().get("response", "").strip()
 
     with LOCK:
@@ -80,16 +76,15 @@ def generate_response(node_id, message):
         save_context()
 
     console.print(f"🤖 [green]Response to {node_id}:[/green] {escape(reply[:60])}... ⏱️ {elapsed:.2f}s")
-
     return reply[:MAX_REPLY_LEN]
 
-# ✅ MQTT Connect callback
-def on_connect(client, userdata, flags, rc):
+# 📡 Callback: on connect
+def on_connect(client, userdata, flags, rc, properties=None):
     console.print(f"✅ [bold green]Connected to MQTT broker[/bold green] (code {rc})")
     client.subscribe(MQTT_TOPIC_SUB)
     console.print(f"📡 [blue]Subscribed to topic:[/blue] {MQTT_TOPIC_SUB}")
 
-# 📥 MQTT Message callback
+# 💬 Callback: on message received
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
@@ -107,10 +102,10 @@ def on_message(client, userdata, msg):
     except Exception as e:
         console.print(f"[red]❌ Error processing message:[/red] {e}")
 
-# 🚀 Main entry
+# 🚀 Entry point
 def main():
     load_context()
-    client = mqtt.Client(MQTT_CLIENT_ID)
+    client = mqtt.Client(client_id=MQTT_CLIENT_ID, callback_api_version=5)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
