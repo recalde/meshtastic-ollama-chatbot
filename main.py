@@ -2,18 +2,19 @@ import os
 import time
 import json
 import requests
-import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 from rich import print
 from rich.console import Console
 from rich.markup import escape
 from threading import Lock
+import paho.mqtt.client as mqtt
+from paho.mqtt.client import CallbackAPIVersion
 
-# 🎛 Initialize logging and load environment
+# 🎛 Setup
 console = Console()
 load_dotenv()
 
-# 🔧 Load configuration from environment
+# 🔧 Environment Configuration
 MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_TOPIC_SUB = os.getenv("MQTT_TOPIC_SUB", "meshtastic/chatbot/request")
@@ -26,11 +27,11 @@ MAX_REPLY_LEN = int(os.getenv("MAX_REPLY_LEN", "240"))
 CONTEXT_DEPTH = int(os.getenv("CONTEXT_DEPTH", "5"))
 CONTEXT_FILE = os.getenv("CONTEXT_FILE", "/data/context.json")
 
-# 📒 Shared state
+# 📒 Shared Context State
 CONTEXT = {}
 LOCK = Lock()
 
-# 🔁 Load chat context from disk
+# 🔁 Load chat memory from disk
 def load_context():
     global CONTEXT
     if os.path.exists(CONTEXT_FILE):
@@ -40,7 +41,7 @@ def load_context():
     else:
         console.print("📄 [blue]No existing context found, starting fresh[/blue]")
 
-# 💾 Save chat context to disk
+# 💾 Save chat memory to disk
 def save_context():
     with LOCK:
         with open(CONTEXT_FILE, "w") as f:
@@ -78,13 +79,13 @@ def generate_response(node_id, message):
     console.print(f"🤖 [green]Response to {node_id}:[/green] {escape(reply[:60])}... ⏱️ {elapsed:.2f}s")
     return reply[:MAX_REPLY_LEN]
 
-# 📡 Callback: on connect
+# 📡 MQTT Connect Handler
 def on_connect(client, userdata, flags, rc, properties=None):
     console.print(f"✅ [bold green]Connected to MQTT broker[/bold green] (code {rc})")
     client.subscribe(MQTT_TOPIC_SUB)
     console.print(f"📡 [blue]Subscribed to topic:[/blue] {MQTT_TOPIC_SUB}")
 
-# 💬 Callback: on message received
+# 📥 MQTT Message Handler
 def on_message(client, userdata, msg):
     try:
         payload = json.loads(msg.payload.decode())
@@ -102,10 +103,10 @@ def on_message(client, userdata, msg):
     except Exception as e:
         console.print(f"[red]❌ Error processing message:[/red] {e}")
 
-# 🚀 Entry point
+# 🚀 Start the chatbot
 def main():
     load_context()
-    client = mqtt.Client(client_id=MQTT_CLIENT_ID, callback_api_version=5)
+    client = mqtt.Client(client_id=MQTT_CLIENT_ID, callback_api_version=CallbackAPIVersion.V5)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
