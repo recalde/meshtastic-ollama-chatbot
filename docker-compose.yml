@@ -5,8 +5,7 @@ services:
     image: eclipse-mosquitto:2
     container_name: mqtt-broker
     ports:
-      - "1883:1883"
-      - "9001:9001"  # Optional: WebSocket support
+      - "1883:1883"          # MQTT broker port
     volumes:
       - mosquitto_data:/mosquitto/data
       - mosquitto_config:/mosquitto/config
@@ -15,15 +14,27 @@ services:
   chatbot:
     build:
       context: .
+    image: meshtastic-chatbot:latest
     container_name: meshtastic-chatbot
-    env_file:
-      - .env
+    environment:
+      - MQTT_BROKER=mqtt
+      - MQTT_PORT=1883
+      - MQTT_TOPIC_SUB=meshtastic/chatbot/request
+      - MQTT_TOPIC_PUB=meshtastic/chatbot/reply
+      - MQTT_CLIENT_ID=meshtastic_bot
+      - OLLAMA_URL=http://ollama.1fern.com:11434/api/generate
+      - OLLAMA_MODEL=llama3:8b
+      - MAX_REPLY_LEN=240
+      - CONTEXT_DEPTH=5
+      - CONTEXT_FILE=/data/context.json
+    volumes:
+      - chatbot_data:/data
     depends_on:
       - mqtt
     restart: unless-stopped
-    volumes:
-      - chatbot_data:/data
-      
+    expose:
+      - "5000"  # for future UI or API support
+
 volumes:
   mosquitto_data:
   mosquitto_config:
