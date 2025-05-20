@@ -8,7 +8,6 @@ from rich.console import Console
 from rich.markup import escape
 from threading import Lock
 import paho.mqtt.client as mqtt
-from paho.mqtt.client import CallbackAPIVersion
 
 # 🎛 Setup
 console = Console()
@@ -106,7 +105,7 @@ def on_message(client, userdata, msg):
 # 🚀 Start the chatbot
 def main():
     load_context()
-    client = mqtt.Client(client_id=MQTT_CLIENT_ID, callback_api_version=CallbackAPIVersion.v5)
+    client = mqtt.Client(client_id=MQTT_CLIENT_ID)  # Removed callback_api_version
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
