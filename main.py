@@ -106,7 +106,7 @@ def on_message(client, userdata, msg):
 # 🚀 Start the chatbot
 def main():
     load_context()
-    client = mqtt.Client(client_id=MQTT_CLIENT_ID, callback_api_version=CallbackAPIVersion.V5)
+    client = mqtt.Client(client_id=MQTT_CLIENT_ID, callback_api_version=CallbackAPIVersion.v5)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
